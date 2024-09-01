@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Kaotisk Interaktivt 3D-væsen</title>
+    <title>Forbedret Interaktiv Entanglementanemone</title>
     <style>
         body { 
             margin: 0; 
@@ -12,6 +12,10 @@
         }
         canvas { 
             display: block; 
+            position: fixed;
+            top: 0;
+            left: 0;
+            z-index: 1;
         }
         #cameraFeed {
             position: fixed;
@@ -32,61 +36,56 @@
     <script>
         const scene = new THREE.Scene();
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         document.body.appendChild(renderer.domElement);
 
         const noiseGen = new SimplexNoise();
 
-        // Skab kaotisk 3D-væsen
-        const particleCount = 1000;
-        const particles = new THREE.BufferGeometry();
-        const positions = new Float32Array(particleCount * 3);
-        const connections = [];
+        // Opret tentakler
+        const tentacleCount = 200;
+        const tentacleSegments = 50;
+        const tentacles = [];
 
-        for (let i = 0; i < particleCount; i++) {
-            positions[i * 3] = (Math.random() - 0.5) * 10;
-            positions[i * 3 + 1] = (Math.random() - 0.5) * 10;
-            positions[i * 3 + 2] = (Math.random() - 0.5) * 10;
-        }
+        const tentacleGroup = new THREE.Group();
+        scene.add(tentacleGroup);
 
-        particles.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-
-        const particleMaterial = new THREE.PointsMaterial({
-            color: 0xFFFFFF,
-            size: 0.1,
-            blending: THREE.AdditiveBlending,
-            transparent: true,
-            opacity: 0.8
-        });
-
-        const particleSystem = new THREE.Points(particles, particleMaterial);
-        scene.add(particleSystem);
-
-        // Skab forbindelser mellem partikler
-        for (let i = 0; i < particleCount; i++) {
-            for (let j = i + 1; j < particleCount; j++) {
-                if (Math.random() < 0.01) {
-                    connections.push([i, j]);
-                }
+        for (let i = 0; i < tentacleCount; i++) {
+            const points = [];
+            for (let j = 0; j < tentacleSegments; j++) {
+                const angle = (i / tentacleCount) * Math.PI * 2;
+                const radius = 2 + j * 0.15 + Math.random() * 0.1;
+                points.push(new THREE.Vector3(
+                    Math.cos(angle) * radius + (Math.random() - 0.5) * 0.5,
+                    Math.sin(angle) * radius + (Math.random() - 0.5) * 0.5,
+                    j * 0.2 - 5 + (Math.random() - 0.5) * 0.5
+                ));
             }
+            const tentacleGeometry = new THREE.BufferGeometry().setFromPoints(points);
+            const tentacleMaterial = new THREE.LineBasicMaterial({ 
+                color: 0xCCCCCC,
+                transparent: true,
+                opacity: 0.7,
+                linewidth: 2
+            });
+            const tentacle = new THREE.Line(tentacleGeometry, tentacleMaterial);
+            tentacleGroup.add(tentacle);
+            tentacles.push(tentacle);
         }
 
-        const lineMaterial = new THREE.LineBasicMaterial({ 
-            color: 0xFFFFFF, 
-            transparent: true, 
-            opacity: 0.3 
-        });
-        const lineGeometry = new THREE.BufferGeometry();
-        const linePositions = new Float32Array(connections.length * 6);
-        lineGeometry.setAttribute('position', new THREE.BufferAttribute(linePositions, 3));
-        const lineSystem = new THREE.LineSegments(lineGeometry, lineMaterial);
-        scene.add(lineSystem);
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+        scene.add(ambientLight);
+
+        const pointLight = new THREE.PointLight(0xffffff, 1);
+        pointLight.position.set(5, 5, 5);
+        scene.add(pointLight);
 
         camera.position.z = 15;
 
+        let time = 0;
         let motionIntensity = 0;
         let motionDirection = new THREE.Vector2(0, 0);
+        let lastMotionDirection = new THREE.Vector2(0, 0);
 
         const video = document.getElementById('cameraFeed');
         const canvas = document.createElement('canvas');
@@ -110,8 +109,8 @@
                 
                 if (lastImageData) {
                     let diffX = 0, diffY = 0, totalDiff = 0;
-                    for (let y = 0; y < canvas.height; y++) {
-                        for (let x = 0; x < canvas.width; x++) {
+                    for (let y = 0; y < canvas.height; y += 5) {
+                        for (let x = 0; x < canvas.width; x += 5) {
                             const i = (y * canvas.width + x) * 4;
                             const diff = Math.abs(imageData.data[i] - lastImageData.data[i]);
                             diffX += diff * (x / canvas.width - 0.5);
@@ -119,7 +118,8 @@
                             totalDiff += diff;
                         }
                     }
-                    motionIntensity = Math.min(totalDiff / (imageData.data.length / 4) / 50, 1);
+                    motionIntensity = Math.min(totalDiff / (imageData.data.length / 100) / 10, 1);
+                    lastMotionDirection.copy(motionDirection);
                     motionDirection.set(diffX / totalDiff, -diffY / totalDiff);
                 }
                 
@@ -129,59 +129,54 @@
 
         function animate() {
             requestAnimationFrame(animate);
+            time += 0.01;
             detectMotion();
+            
+            tentacles.forEach((tentacle, index) => {
+                const positions = tentacle.geometry.attributes.position.array;
+                for (let i = 0; i < positions.length; i += 3) {
+                    const segmentIndex = i / 3;
+                    const noiseValue = noiseGen.noise4D(
+                        positions[i] * 0.3, 
+                        positions[i+1] * 0.3, 
+                        positions[i+2] * 0.3, 
+                        time * 0.5 + index * 0.1
+                    ) * 0.5;
 
-            const time = Date.now() * 0.001;
-            const positions = particles.attributes.position.array;
+                    const chaosX = Math.sin(time * 3 + index) * 0.2;
+                    const chaosY = Math.cos(time * 2.5 + index * 1.5) * 0.2;
+                    const chaosZ = Math.sin(time * 2 + index * 0.7) * 0.2;
 
-            for (let i = 0; i < particleCount; i++) {
-                const ix = i * 3;
-                const iy = i * 3 + 1;
-                const iz = i * 3 + 2;
+                    positions[i] += (noiseValue * 0.05 + chaosX) * (segmentIndex / tentacleSegments);
+                    positions[i+1] += (noiseValue * 0.05 + chaosY) * (segmentIndex / tentacleSegments);
+                    positions[i+2] += (noiseValue * 0.05 + chaosZ) * (segmentIndex / tentacleSegments);
 
-                // Kaotisk bevægelse
-                positions[ix] += Math.sin(time + i) * 0.01 + motionDirection.x * motionIntensity * 0.1;
-                positions[iy] += Math.cos(time + i * 1.1) * 0.01 + motionDirection.y * motionIntensity * 0.1;
-                positions[iz] += Math.sin(time * 1.1 + i * 1.2) * 0.01;
+                    // Reagér på bevægelsesretning og intensitet
+                    positions[i] += motionDirection.x * motionIntensity * 0.2 * (segmentIndex / tentacleSegments);
+                    positions[i+1] += motionDirection.y * motionIntensity * 0.2 * (segmentIndex / tentacleSegments);
 
-                // Begræns positioner
-                positions[ix] = Math.max(Math.min(positions[ix], 5), -5);
-                positions[iy] = Math.max(Math.min(positions[iy], 5), -5);
-                positions[iz] = Math.max(Math.min(positions[iz], 5), -5);
+                    // Tilføj bølgeeffekt baseret på bevægelsesændring
+                    const waveEffect = Math.sin(time * 5 + segmentIndex * 0.5) * 
+                                       (motionDirection.distanceTo(lastMotionDirection)) * 
+                                       0.5 * segmentIndex / tentacleSegments;
+                    positions[i] += waveEffect;
+                    positions[i+1] += waveEffect;
+                }
+                tentacle.geometry.attributes.position.needsUpdate = true;
 
-                // Tilføj noise-baseret bevægelse
-                const noiseValue = noiseGen.noise3D(positions[ix] * 0.1, positions[iy] * 0.1, time * 0.5) * motionIntensity;
-                positions[ix] += noiseValue * 0.1;
-                positions[iy] += noiseValue * 0.1;
-                positions[iz] += noiseValue * 0.1;
-            }
+                // Juster farve og opacitet baseret på bevægelse
+                const intensity = 0.7 + motionIntensity * 0.3;
+                tentacle.material.color.setRGB(intensity, intensity, intensity);
+                tentacle.material.opacity = 0.5 + motionIntensity * 0.5;
+            });
 
-            particles.attributes.position.needsUpdate = true;
-
-            // Opdater forbindelser
-            for (let i = 0; i < connections.length; i++) {
-                const [a, b] = connections[i];
-                const ax = positions[a * 3], ay = positions[a * 3 + 1], az = positions[a * 3 + 2];
-                const bx = positions[b * 3], by = positions[b * 3 + 1], bz = positions[b * 3 + 2];
-                linePositions[i * 6] = ax;
-                linePositions[i * 6 + 1] = ay;
-                linePositions[i * 6 + 2] = az;
-                linePositions[i * 6 + 3] = bx;
-                linePositions[i * 6 + 4] = by;
-                linePositions[i * 6 + 5] = bz;
-            }
-
-            lineSystem.geometry.attributes.position.needsUpdate = true;
-
-            // Rotér væsenet baseret på bevægelse
-            particleSystem.rotation.x += motionDirection.y * motionIntensity * 0.05;
-            particleSystem.rotation.y += motionDirection.x * motionIntensity * 0.05;
-            lineSystem.rotation.copy(particleSystem.rotation);
+            // Rotér hele anemonen baseret på bevægelse
+            tentacleGroup.rotation.x += motionDirection.y * motionIntensity * 0.1;
+            tentacleGroup.rotation.y += motionDirection.x * motionIntensity * 0.1;
 
             // Pulserende effekt
-            const scale = 1 + Math.sin(time * 2) * 0.1 * motionIntensity;
-            particleSystem.scale.set(scale, scale, scale);
-            lineSystem.scale.copy(particleSystem.scale);
+            const pulseFactor = 1 + Math.sin(time * 3) * 0.1 + motionIntensity * 0.3;
+            tentacleGroup.scale.set(pulseFactor, pulseFactor, pulseFactor);
 
             renderer.render(scene, camera);
         }
@@ -189,6 +184,8 @@
         animate();
 
         // Fuldskærm funktionalitet
+        let lastTapTime = 0;
+
         function toggleFullScreen() {
             if (!document.fullscreenElement) {
                 document.documentElement.requestFullscreen();
@@ -199,7 +196,18 @@
             }
         }
 
-        document.addEventListener('click', toggleFullScreen);
+        function handleTap(event) {
+            const currentTime = new Date().getTime();
+            const tapLength = currentTime - lastTapTime;
+            if (tapLength < 300 && tapLength > 0) {
+                toggleFullScreen();
+                event.preventDefault();
+            }
+            lastTapTime = currentTime;
+        }
+
+        document.addEventListener('touchend', handleTap);
+        document.addEventListener('mouseup', handleTap);
 
         window.addEventListener('resize', () => {
             camera.aspect = window.innerWidth / window.innerHeight;
