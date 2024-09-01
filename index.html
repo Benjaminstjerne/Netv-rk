@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Forbindelse</title>
+    <title>Robust Synlig Entanglementanemone</title>
     <style>
         body { 
             margin: 0; 
@@ -27,10 +27,19 @@
             opacity: 0;
             z-index: -1;
         }
+        #debug {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            color: white;
+            font-family: Arial, sans-serif;
+            z-index: 100;
+        }
     </style>
 </head>
 <body>
     <video id="cameraFeed" autoplay playsinline></video>
+    <div id="debug"></div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/simplex-noise/2.4.0/simplex-noise.min.js"></script>
     <script>
@@ -92,18 +101,27 @@
         const ctx = canvas.getContext('2d');
         let lastImageData;
 
-        navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
-            .then(stream => {
-                video.srcObject = stream;
-                video.onloadedmetadata = () => {
-                    canvas.width = video.videoWidth;
-                    canvas.height = video.videoHeight;
-                };
-            })
-            .catch(err => console.error("Fejl ved adgang til kamera:", err));
+        let cameraActive = false;
+
+        function initCamera() {
+            navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+                .then(stream => {
+                    video.srcObject = stream;
+                    video.onloadedmetadata = () => {
+                        canvas.width = video.videoWidth;
+                        canvas.height = video.videoHeight;
+                        cameraActive = true;
+                        document.getElementById('debug').innerHTML = "Kamera aktiveret";
+                    };
+                })
+                .catch(err => {
+                    console.error("Fejl ved adgang til kamera:", err);
+                    document.getElementById('debug').innerHTML = "Kamerafejl: " + err.message;
+                });
+        }
 
         function detectMotion() {
-            if (video.readyState === video.HAVE_ENOUGH_DATA) {
+            if (cameraActive && video.readyState === video.HAVE_ENOUGH_DATA) {
                 ctx.drawImage(video, 0, 0);
                 const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
                 
@@ -130,7 +148,14 @@
         function animate() {
             requestAnimationFrame(animate);
             time += 0.01;
-            detectMotion();
+            
+            if (cameraActive) {
+                detectMotion();
+            } else {
+                // Simuler bevægelse, hvis kameraet ikke er aktivt
+                motionIntensity = (Math.sin(time) + 1) / 2;
+                motionDirection.set(Math.cos(time), Math.sin(time));
+            }
             
             tentacles.forEach((tentacle, index) => {
                 const positions = tentacle.geometry.attributes.position.array;
@@ -179,8 +204,12 @@
             tentacleGroup.scale.set(pulseFactor, pulseFactor, pulseFactor);
 
             renderer.render(scene, camera);
+
+            // Opdater debug info
+            document.getElementById('debug').innerHTML += "<br>Motion: " + motionIntensity.toFixed(2);
         }
 
+        initCamera();
         animate();
 
         // Fuldskærm funktionalitet
