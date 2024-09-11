@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Vandbølgesimulation</title>
+    <title>agua</title>
     <style>
         body, html {
             margin: 0;
@@ -16,6 +16,7 @@
             display: block;
             width: 100%;
             height: 100%;
+            cursor: pointer;
         }
     </style>
 </head>
@@ -131,18 +132,16 @@
                 canvas.requestFullscreen().catch(err => {
                     console.error(`Fejl ved overgang til fuldskærm: ${err.message}`);
                 });
-            } else {
-                document.exitFullscreen();
             }
         }
 
         canvas.addEventListener('click', (event) => {
             createRipple(event.clientX, event.clientY, 5);
             if (!audioContext) setupAudio();
+            toggleFullscreen();
         });
 
         window.addEventListener('resize', resizeCanvas);
-        canvas.addEventListener('dblclick', toggleFullscreen);
 
         resizeCanvas();
         requestAnimationFrame(drawWater);
