@@ -2,247 +2,114 @@
 <html lang="da">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Robust Synlig Entanglementanemone</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Simpel Lydreaktiv Visualisering</title>
     <style>
-        body { 
-            margin: 0; 
-            overflow: hidden; 
-            background-color: #000;
-        }
-        canvas { 
-            display: block; 
-            position: fixed;
-            top: 0;
-            left: 0;
-            z-index: 1;
-        }
-        #cameraFeed {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-            opacity: 0;
-            z-index: -1;
-        }
-        #debug {
-            position: fixed;
-            top: 10px;
-            left: 10px;
-            color: white;
-            font-family: Arial, sans-serif;
-            z-index: 100;
-        }
+        body { margin: 0; overflow: hidden; background-color: black; color: white; font-family: Arial, sans-serif; }
+        canvas { display: block; }
+        #debug { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.5); padding: 10px; }
     </style>
 </head>
 <body>
-    <video id="cameraFeed" autoplay playsinline></video>
     <div id="debug"></div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/simplex-noise/2.4.0/simplex-noise.min.js"></script>
     <script>
-        const scene = new THREE.Scene();
-        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        document.body.appendChild(renderer.domElement);
+        let scene, camera, renderer, particles;
+        let audioContext, analyser, dataArray;
+        const particleCount = 10000;
+        let avgAudioLevel = 0;
 
-        const noiseGen = new SimplexNoise();
+        function init() {
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            renderer = new THREE.WebGLRenderer();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
 
-        // Opret tentakler
-        const tentacleCount = 200;
-        const tentacleSegments = 50;
-        const tentacles = [];
+            const geometry = new THREE.BufferGeometry();
+            const positions = new Float32Array(particleCount * 3);
 
-        const tentacleGroup = new THREE.Group();
-        scene.add(tentacleGroup);
-
-        for (let i = 0; i < tentacleCount; i++) {
-            const points = [];
-            for (let j = 0; j < tentacleSegments; j++) {
-                const angle = (i / tentacleCount) * Math.PI * 2;
-                const radius = 2 + j * 0.15 + Math.random() * 0.1;
-                points.push(new THREE.Vector3(
-                    Math.cos(angle) * radius + (Math.random() - 0.5) * 0.5,
-                    Math.sin(angle) * radius + (Math.random() - 0.5) * 0.5,
-                    j * 0.2 - 5 + (Math.random() - 0.5) * 0.5
-                ));
+            for (let i = 0; i < particleCount * 3; i += 3) {
+                positions[i] = (Math.random() - 0.5) * 4;
+                positions[i + 1] = (Math.random() - 0.5) * 4;
+                positions[i + 2] = (Math.random() - 0.5) * 4;
             }
-            const tentacleGeometry = new THREE.BufferGeometry().setFromPoints(points);
-            const tentacleMaterial = new THREE.LineBasicMaterial({ 
-                color: 0xCCCCCC,
-                transparent: true,
-                opacity: 0.7,
-                linewidth: 2
-            });
-            const tentacle = new THREE.Line(tentacleGeometry, tentacleMaterial);
-            tentacleGroup.add(tentacle);
-            tentacles.push(tentacle);
+
+            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+            const material = new THREE.PointsMaterial({ color: 0xffffff, size: 0.05 });
+
+            particles = new THREE.Points(geometry, material);
+            scene.add(particles);
+
+            camera.position.z = 2;
+
+            initAudio();
+            animate();
         }
 
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
-        scene.add(ambientLight);
+        function initAudio() {
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            analyser = audioContext.createAnalyser();
+            analyser.fftSize = 256;
+            dataArray = new Uint8Array(analyser.frequencyBinCount);
 
-        const pointLight = new THREE.PointLight(0xffffff, 1);
-        pointLight.position.set(5, 5, 5);
-        scene.add(pointLight);
-
-        camera.position.z = 15;
-
-        let time = 0;
-        let motionIntensity = 0;
-        let motionDirection = new THREE.Vector2(0, 0);
-        let lastMotionDirection = new THREE.Vector2(0, 0);
-
-        const video = document.getElementById('cameraFeed');
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d');
-        let lastImageData;
-
-        let cameraActive = false;
-
-        function initCamera() {
-            navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+            navigator.mediaDevices.getUserMedia({ audio: true })
                 .then(stream => {
-                    video.srcObject = stream;
-                    video.onloadedmetadata = () => {
-                        canvas.width = video.videoWidth;
-                        canvas.height = video.videoHeight;
-                        cameraActive = true;
-                        document.getElementById('debug').innerHTML = "Kamera aktiveret";
-                    };
+                    const source = audioContext.createMediaStreamSource(stream);
+                    source.connect(analyser);
+                    console.log("Audio initialized successfully");
                 })
-                .catch(err => {
-                    console.error("Fejl ved adgang til kamera:", err);
-                    document.getElementById('debug').innerHTML = "Kamerafejl: " + err.message;
-                });
-        }
-
-        function detectMotion() {
-            if (cameraActive && video.readyState === video.HAVE_ENOUGH_DATA) {
-                ctx.drawImage(video, 0, 0);
-                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-                
-                if (lastImageData) {
-                    let diffX = 0, diffY = 0, totalDiff = 0;
-                    for (let y = 0; y < canvas.height; y += 5) {
-                        for (let x = 0; x < canvas.width; x += 5) {
-                            const i = (y * canvas.width + x) * 4;
-                            const diff = Math.abs(imageData.data[i] - lastImageData.data[i]);
-                            diffX += diff * (x / canvas.width - 0.5);
-                            diffY += diff * (y / canvas.height - 0.5);
-                            totalDiff += diff;
-                        }
-                    }
-                    motionIntensity = Math.min(totalDiff / (imageData.data.length / 100) / 10, 1);
-                    lastMotionDirection.copy(motionDirection);
-                    motionDirection.set(diffX / totalDiff, -diffY / totalDiff);
-                }
-                
-                lastImageData = imageData;
-            }
+                .catch(err => console.error('Fejl ved adgang til mikrofon:', err));
         }
 
         function animate() {
             requestAnimationFrame(animate);
-            time += 0.01;
-            
-            if (cameraActive) {
-                detectMotion();
-            } else {
-                // Simuler bevægelse, hvis kameraet ikke er aktivt
-                motionIntensity = (Math.sin(time) + 1) / 2;
-                motionDirection.set(Math.cos(time), Math.sin(time));
-            }
-            
-            tentacles.forEach((tentacle, index) => {
-                const positions = tentacle.geometry.attributes.position.array;
+
+            if (analyser && dataArray) {
+                analyser.getByteFrequencyData(dataArray);
+                avgAudioLevel = dataArray.reduce((sum, value) => sum + value, 0) / dataArray.length / 255;
+
+                const positions = particles.geometry.attributes.position.array;
                 for (let i = 0; i < positions.length; i += 3) {
-                    const segmentIndex = i / 3;
-                    const noiseValue = noiseGen.noise4D(
-                        positions[i] * 0.3, 
-                        positions[i+1] * 0.3, 
-                        positions[i+2] * 0.3, 
-                        time * 0.5 + index * 0.1
-                    ) * 0.5;
-
-                    const chaosX = Math.sin(time * 3 + index) * 0.2;
-                    const chaosY = Math.cos(time * 2.5 + index * 1.5) * 0.2;
-                    const chaosZ = Math.sin(time * 2 + index * 0.7) * 0.2;
-
-                    positions[i] += (noiseValue * 0.05 + chaosX) * (segmentIndex / tentacleSegments);
-                    positions[i+1] += (noiseValue * 0.05 + chaosY) * (segmentIndex / tentacleSegments);
-                    positions[i+2] += (noiseValue * 0.05 + chaosZ) * (segmentIndex / tentacleSegments);
-
-                    // Reagér på bevægelsesretning og intensitet
-                    positions[i] += motionDirection.x * motionIntensity * 0.2 * (segmentIndex / tentacleSegments);
-                    positions[i+1] += motionDirection.y * motionIntensity * 0.2 * (segmentIndex / tentacleSegments);
-
-                    // Tilføj bølgeeffekt baseret på bevægelsesændring
-                    const waveEffect = Math.sin(time * 5 + segmentIndex * 0.5) * 
-                                       (motionDirection.distanceTo(lastMotionDirection)) * 
-                                       0.5 * segmentIndex / tentacleSegments;
-                    positions[i] += waveEffect;
-                    positions[i+1] += waveEffect;
+                    positions[i + 1] += (Math.random() - 0.5) * avgAudioLevel * 0.1;
+                    if (positions[i + 1] > 2) positions[i + 1] = -2;
+                    if (positions[i + 1] < -2) positions[i + 1] = 2;
                 }
-                tentacle.geometry.attributes.position.needsUpdate = true;
+                particles.geometry.attributes.position.needsUpdate = true;
 
-                // Juster farve og opacitet baseret på bevægelse
-                const intensity = 0.7 + motionIntensity * 0.3;
-                tentacle.material.color.setRGB(intensity, intensity, intensity);
-                tentacle.material.opacity = 0.5 + motionIntensity * 0.5;
-            });
+                particles.material.size = 0.05 + avgAudioLevel * 0.1;
+            }
 
-            // Rotér hele anemonen baseret på bevægelse
-            tentacleGroup.rotation.x += motionDirection.y * motionIntensity * 0.1;
-            tentacleGroup.rotation.y += motionDirection.x * motionIntensity * 0.1;
-
-            // Pulserende effekt
-            const pulseFactor = 1 + Math.sin(time * 3) * 0.1 + motionIntensity * 0.3;
-            tentacleGroup.scale.set(pulseFactor, pulseFactor, pulseFactor);
-
+            updateDebug();
             renderer.render(scene, camera);
-
-            // Opdater debug info
-            document.getElementById('debug').innerHTML += "<br>Motion: " + motionIntensity.toFixed(2);
         }
 
-        initCamera();
-        animate();
+        function updateDebug() {
+            const debugElement = document.getElementById('debug');
+            debugElement.innerHTML = `
+                Audio Level: ${avgAudioLevel.toFixed(4)}<br>
+                Particle Count: ${particleCount}<br>
+                Particle Size: ${particles.material.size.toFixed(4)}
+            `;
+        }
 
-        // Fuldskærm funktionalitet
-        let lastTapTime = 0;
-
-        function toggleFullScreen() {
-            if (!document.fullscreenElement) {
+        document.addEventListener('click', () => {
+            if (audioContext.state === 'suspended') {
+                audioContext.resume();
+            }
+            if (document.documentElement.requestFullscreen) {
                 document.documentElement.requestFullscreen();
-            } else {
-                if (document.exitFullscreen) {
-                    document.exitFullscreen();
-                }
             }
-        }
-
-        function handleTap(event) {
-            const currentTime = new Date().getTime();
-            const tapLength = currentTime - lastTapTime;
-            if (tapLength < 300 && tapLength > 0) {
-                toggleFullScreen();
-                event.preventDefault();
-            }
-            lastTapTime = currentTime;
-        }
-
-        document.addEventListener('touchend', handleTap);
-        document.addEventListener('mouseup', handleTap);
+        });
 
         window.addEventListener('resize', () => {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
         });
+
+        init();
     </script>
 </body>
 </html>
