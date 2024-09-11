@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Avanceret Vandbølgesimulation</title>
+    <title>Vandbølgesimulation</title>
     <style>
         body, html {
             margin: 0;
@@ -42,11 +42,11 @@
         }
 
         async function setupAudio() {
-            audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            analyser = audioContext.createAnalyser();
-            analyser.fftSize = 256;
-
             try {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                analyser = audioContext.createAnalyser();
+                analyser.fftSize = 256;
+
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
                 const source = audioContext.createMediaStreamSource(stream);
                 source.connect(analyser);
@@ -76,12 +76,11 @@
                 }
             }
 
-            // Swap buffers
             [current, previous] = [previous, current];
         }
 
         function drawWater(currentTime) {
-            const deltaTime = (currentTime - lastTime) / 16; // Normalize to 60 FPS
+            const deltaTime = Math.min((currentTime - lastTime) / 16, 2);
             lastTime = currentTime;
 
             ctx.fillStyle = 'rgba(0, 0, 0, 0.1)';
@@ -137,13 +136,16 @@
             }
         }
 
+        canvas.addEventListener('click', (event) => {
+            createRipple(event.clientX, event.clientY, 5);
+            if (!audioContext) setupAudio();
+        });
+
         window.addEventListener('resize', resizeCanvas);
-        canvas.addEventListener('click', toggleFullscreen);
+        canvas.addEventListener('dblclick', toggleFullscreen);
 
         resizeCanvas();
-        setupAudio().then(() => {
-            requestAnimationFrame(drawWater);
-        });
+        requestAnimationFrame(drawWater);
     </script>
 </body>
 </html>
