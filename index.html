@@ -2,155 +2,148 @@
 <html lang="da">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>3D Lydreaktivt Vand</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Avanceret Vandbølgesimulation</title>
     <style>
-        body { margin: 0; overflow: hidden; background-color: black; }
-        canvas { display: block; }
+        body, html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            overflow: hidden;
+            background-color: black;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
     </style>
 </head>
 <body>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <canvas id="canvas"></canvas>
+
     <script>
-        let scene, camera, renderer, water;
-        let audioContext, analyser, dataArray;
-        let time = 0;
-        let drops = [];
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        let audioContext, analyser;
+        let lastTime = 0;
 
-        function init() {
-            scene = new THREE.Scene();
-            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-            renderer = new THREE.WebGLRenderer({ antialias: true });
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            document.body.appendChild(renderer.domElement);
+        const resolution = 4;
+        let cols, rows;
+        let current, previous;
 
-            const geometry = new THREE.PlaneGeometry(2, 2, 256, 256);
-
-            const material = new THREE.ShaderMaterial({
-                uniforms: {
-                    time: { value: 0 },
-                    drops: { value: [] }
-                },
-                vertexShader: `
-                    uniform float time;
-                    uniform vec3 drops[10];
-                    varying vec2 vUv;
-                    varying float vElevation;
-
-                    float wave(vec2 position) {
-                        float elevation = 0.0;
-                        for(int i = 0; i < 10; i++) {
-                            vec3 drop = drops[i];
-                            float dist = distance(position, drop.xy);
-                            float amplitude = drop.z;
-                            float frequency = 2.0;
-                            float phase = time * 5.0;
-                            elevation += amplitude * sin(dist * frequency - phase) * exp(-dist);
-                        }
-                        return elevation;
-                    }
-
-                    void main() {
-                        vUv = uv;
-                        vec3 pos = position;
-                        float elevation = wave(pos.xy);
-                        pos.z += elevation * 0.1;
-                        vElevation = elevation;
-                        gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
-                    }
-                `,
-                fragmentShader: `
-                    uniform float time;
-                    varying vec2 vUv;
-                    varying float vElevation;
-
-                    void main() {
-                        vec3 baseColor = vec3(0.0, 0.4, 0.8);
-                        vec3 highlightColor = vec3(0.3, 0.7, 1.0);
-                        float highlight = smoothstep(0.0, 0.1, vElevation);
-                        vec3 color = mix(baseColor, highlightColor, highlight);
-                        float alpha = 0.8 + vElevation * 0.2;
-                        gl_FragColor = vec4(color, alpha);
-                    }
-                `,
-                transparent: true
-            });
-
-            water = new THREE.Mesh(geometry, material);
-            water.rotation.x = -Math.PI / 2;
-            scene.add(water);
-
-            camera.position.set(0, 1, 1);
-            camera.lookAt(0, 0, 0);
-
-            initAudio();
-            animate();
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            cols = Math.floor(canvas.width / resolution);
+            rows = Math.floor(canvas.height / resolution);
+            current = new Array(cols).fill().map(() => new Array(rows).fill(0));
+            previous = new Array(cols).fill().map(() => new Array(rows).fill(0));
         }
 
-        function initAudio() {
+        async function setupAudio() {
             audioContext = new (window.AudioContext || window.webkitAudioContext)();
             analyser = audioContext.createAnalyser();
             analyser.fftSize = 256;
-            dataArray = new Uint8Array(analyser.frequencyBinCount);
 
-            navigator.mediaDevices.getUserMedia({ audio: true })
-                .then(stream => {
-                    const source = audioContext.createMediaStreamSource(stream);
-                    source.connect(analyser);
-                })
-                .catch(err => console.error('Fejl ved adgang til mikrofon:', err));
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                const source = audioContext.createMediaStreamSource(stream);
+                source.connect(analyser);
+            } catch (err) {
+                console.error('Mikrofon adgang nægtet:', err);
+            }
         }
 
-        function createDrop(amplitude) {
-            return {
-                x: (Math.random() - 0.5) * 2,
-                y: (Math.random() - 0.5) * 2,
-                z: amplitude,
-                time: 0
-            };
+        function createRipple(x, y, strength) {
+            const colIndex = Math.floor(x / resolution);
+            const rowIndex = Math.floor(y / resolution);
+            if (colIndex >= 0 && colIndex < cols && rowIndex >= 0 && rowIndex < rows) {
+                previous[colIndex][rowIndex] = strength;
+            }
         }
 
-        function animate() {
-            requestAnimationFrame(animate);
-            time += 0.016;
-
-            if (analyser && dataArray) {
-                analyser.getByteFrequencyData(dataArray);
-                let avgAudioLevel = dataArray.reduce((sum, value) => sum + value, 0) / dataArray.length / 255;
-
-                if (Math.random() < avgAudioLevel * 0.3) {
-                    drops.push(createDrop(avgAudioLevel * 0.5));
+        function updateWater() {
+            for (let i = 1; i < cols - 1; i++) {
+                for (let j = 1; j < rows - 1; j++) {
+                    current[i][j] = (
+                        previous[i-1][j] +
+                        previous[i+1][j] +
+                        previous[i][j-1] +
+                        previous[i][j+1]
+                    ) / 2 - current[i][j];
+                    current[i][j] *= 0.99; // damping
                 }
             }
 
-            drops = drops.filter(drop => drop.time < 5);
-            drops.forEach(drop => {
-                drop.time += 0.016;
-                drop.z *= 0.98;
-            });
-
-            water.material.uniforms.time.value = time;
-            water.material.uniforms.drops.value = drops.slice(0, 10).map(drop => new THREE.Vector3(drop.x, drop.y, drop.z));
-
-            renderer.render(scene, camera);
+            // Swap buffers
+            [current, previous] = [previous, current];
         }
 
-        document.addEventListener('click', () => {
-            if (audioContext && audioContext.state === 'suspended') {
-                audioContext.resume();
-            }
-            if (document.documentElement.requestFullscreen) {
-                document.documentElement.requestFullscreen();
-            }
-        });
+        function drawWater(currentTime) {
+            const deltaTime = (currentTime - lastTime) / 16; // Normalize to 60 FPS
+            lastTime = currentTime;
 
-        window.addEventListener('resize', () => {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-        });
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.1)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-        init();
+            if (analyser) {
+                const dataArray = new Uint8Array(analyser.frequencyBinCount);
+                analyser.getByteFrequencyData(dataArray);
+
+                const average = dataArray.reduce((a, b) => a + b) / dataArray.length;
+                if (average > 30) {
+                    const x = Math.random() * canvas.width;
+                    const y = Math.random() * canvas.height;
+                    createRipple(x, y, average / 10);
+                }
+            }
+
+            updateWater();
+
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+            ctx.lineWidth = 1;
+
+            for (let i = 0; i < cols; i++) {
+                for (let j = 0; j < rows; j++) {
+                    const x = i * resolution;
+                    const y = j * resolution;
+                    const height = current[i][j];
+                    
+                    ctx.fillStyle = `rgba(255, 255, 255, ${Math.abs(height) * 0.2})`;
+                    ctx.fillRect(x, y, resolution, resolution);
+
+                    if (i > 0 && j > 0) {
+                        ctx.beginPath();
+                        ctx.moveTo(x, y);
+                        ctx.lineTo(x - resolution, y - resolution);
+                        ctx.globalAlpha = Math.abs(height) * 0.5;
+                        ctx.stroke();
+                    }
+                }
+            }
+
+            ctx.globalAlpha = 1;
+            requestAnimationFrame(drawWater);
+        }
+
+        function toggleFullscreen() {
+            if (!document.fullscreenElement) {
+                canvas.requestFullscreen().catch(err => {
+                    console.error(`Fejl ved overgang til fuldskærm: ${err.message}`);
+                });
+            } else {
+                document.exitFullscreen();
+            }
+        }
+
+        window.addEventListener('resize', resizeCanvas);
+        canvas.addEventListener('click', toggleFullscreen);
+
+        resizeCanvas();
+        setupAudio().then(() => {
+            requestAnimationFrame(drawWater);
+        });
     </script>
 </body>
 </html>
